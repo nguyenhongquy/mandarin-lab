@@ -5,6 +5,10 @@ import { compareToneFeatures } from './acousticComparison'
 import { F0TrajectoryChart } from './F0TrajectoryChart'
 import type { PitchDisplayMode } from './F0TrajectoryChart'
 import { comparePitchAnalyses, MIN_COMPARISON_VOICED_FRAMES, normalizePitchAnalysis } from './pitchComparison'
+import { evaluateToneProduction } from './feedback/evaluateToneProduction.ts'
+import { normalizeFeedbackEvidence } from './feedback/evidenceHighlight.ts'
+import type { FeedbackEvidence } from './feedback/toneFeedbackTypes.ts'
+import { ToneFeedbackPanel } from './ToneFeedbackPanel.tsx'
 import type { PitchAnalysis } from './pitchAnalysis'
 import { extractToneFeatures } from './toneAcoustics'
 import { browserTtsReference, referenceSourceLabel } from './toneReferences'
@@ -37,6 +41,7 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
   const [showLearner, setShowLearner] = useState(true)
   const [showSchematic, setShowSchematic] = useState(true)
   const [showAcousticMarkers, setShowAcousticMarkers] = useState(false)
+  const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null)
   const mountedRef = useRef(false)
   const recording = useToneRecording()
   const selectedTone = toneDefinition(tone)
@@ -46,15 +51,31 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
   const referenceCanPlot = Boolean(referenceAnalysis && normalizePitchAnalysis(referenceAnalysis))
   const learnerFeatures = useMemo(() => analysis ? extractToneFeatures(analysis) : null, [analysis])
   const referenceFeatures = useMemo(() => referenceAnalysis ? extractToneFeatures(referenceAnalysis) : null, [referenceAnalysis])
+  const toneFeedback = useMemo(() => analysis && !analyzing
+    ? evaluateToneProduction({
+        tone,
+        learnerFeatures,
+        referenceFeatures,
+        referenceSource: reference.source,
+      })
+    : null, [analysis, analyzing, tone, learnerFeatures, referenceFeatures, reference.source])
+  const feedbackEvidence: FeedbackEvidence[] = toneFeedback
+    ? [toneFeedback.primary, ...toneFeedback.additional].flatMap(item => item.evidence)
+    : []
+  const selectedFeedbackEvidence = feedbackEvidence.find(item => item.id === selectedEvidenceId) ?? null
+  const highlightableEvidenceIds = new Set(feedbackEvidence
+    .filter(item => normalizeFeedbackEvidence(item, analysis, referenceAnalysis) !== null)
+    .map(item => item.id))
+  const evidenceHighlight = selectedFeedbackEvidence
+    ? normalizeFeedbackEvidence(selectedFeedbackEvidence, analysis, referenceAnalysis)
+    : null
   const acousticComparison = learnerFeatures && referenceFeatures
     ? compareToneFeatures(learnerFeatures, referenceFeatures)
     : null
   const comparisonFeedback = analysis
     ? referenceAnalysis
       ? comparePitchAnalyses(referenceAnalysis, analysis)
-      : [reference.source === 'browser-tts'
-        ? 'Measured reference F0 is unavailable; browser TTS is audio-only, so comparison feedback is withheld.'
-        : 'Reference F0 analysis is unavailable; comparison feedback is withheld.']
+      : []
     : []
   const feedback = analysis
     ? [...new Set([...comparisonFeedback, ...analysis.warnings, ...(referenceAnalysis?.warnings ?? [])])]
@@ -67,6 +88,10 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
       referenceAudio.stop()
     }
   }, [referenceAudio.stop])
+
+  useEffect(() => {
+    setSelectedEvidenceId(null)
+  }, [analysis, referenceAnalysis, reference.id, reference.source, tone])
 
   useEffect(() => {
     let active = true
@@ -87,6 +112,9 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
   async function analyze() {
     if (!recording.blob || recording.recording || recording.playing || referenceAudio.playing || analyzing) return
     setAnalyzing(true)
+    setAnalysis(null)
+    setReferenceAnalysis(null)
+    setSelectedEvidenceId(null)
     setAnalysisError('')
     setReferenceAnalysisWarning('')
     try {
@@ -130,18 +158,24 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
     recording.discard()
     setAnalysis(null)
     setReferenceAnalysis(null)
+    setSelectedEvidenceId(null)
     setAnalysisError('')
     setReferenceAnalysisWarning('')
   }
 
   function listenToReference() {
     if (recording.recording || recording.requesting || recording.playing || referenceAudio.playing
-      || referenceLoading || !referenceAudio.available(reference)) return
+      || analyzing || referenceLoading || !referenceAudio.available(reference)) return
     void referenceAudio.play(reference)
   }
 
   function startRecording() {
     if (referenceAudio.playing) return
+    setAnalysis(null)
+    setReferenceAnalysis(null)
+    setSelectedEvidenceId(null)
+    setAnalysisError('')
+    setReferenceAnalysisWarning('')
     void recording.startRecording()
   }
 
@@ -156,14 +190,18 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
   }
 
   function chooseBrowserFallback() {
+    if (analyzing || referenceAudio.playing) return
     setUseBrowserFallback(true)
     setReferenceAnalysis(null)
+    setSelectedEvidenceId(null)
     setReferenceAnalysisWarning('Browser TTS is available for listening only; measured reference F0 comparison is unavailable.')
   }
 
   function chooseLocalReference() {
+    if (analyzing || referenceAudio.playing) return
     setUseBrowserFallback(false)
     setReferenceAnalysis(null)
+    setSelectedEvidenceId(null)
     setReferenceAnalysisWarning('')
   }
 
@@ -191,7 +229,10 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
               if (nextTone) {
                 setTone(nextTone.tone)
                 setUseBrowserFallback(false)
+                setAnalysis(null)
                 setReferenceAnalysis(null)
+                setSelectedEvidenceId(null)
+                setAnalysisError('')
                 setReferenceAnalysisWarning('')
               }
             }}>
@@ -239,17 +280,17 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
       <div className="flex flex-wrap gap-2">
         <button type="button" className="button button-primary"
           disabled={!referenceAudio.available(reference) || referenceAudio.playing || recording.recording
-            || recording.requesting || recording.playing || referenceLoading}
+            || recording.requesting || recording.playing || analyzing || referenceLoading}
           onClick={listenToReference}>
           Listen to reference
         </button>
         {localReference && !useBrowserFallback && <button type="button" className="button button-secondary"
-          disabled={referenceAudio.playing || recording.recording || recording.requesting || recording.playing}
+          disabled={referenceAudio.playing || recording.recording || recording.requesting || recording.playing || analyzing}
           onClick={chooseBrowserFallback}>
           Use Browser TTS fallback
         </button>}
         {localReference && useBrowserFallback && <button type="button" className="button button-secondary"
-          disabled={referenceAudio.playing} onClick={chooseLocalReference}>
+          disabled={referenceAudio.playing || analyzing} onClick={chooseLocalReference}>
           Use local TTS reference
         </button>}
         {referenceAudio.playing && <button type="button" className="button button-secondary" onClick={referenceAudio.stop}>
@@ -393,17 +434,24 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
         <F0TrajectoryChart learnerAnalysis={analysis} referenceAnalysis={referenceAnalysis}
           referenceLabel={referenceLabel} mode={mode} showLearner={showLearner} showReference={showReference}
           learnerFeatures={learnerFeatures} referenceFeatures={referenceFeatures}
-          showFeatureMarkers={showAcousticMarkers} />
+          showFeatureMarkers={showAcousticMarkers} evidenceHighlight={evidenceHighlight} />
+        {toneFeedback && <ToneFeedbackPanel tone={tone} result={toneFeedback}
+          selectedEvidenceId={selectedEvidenceId}
+          highlightableEvidenceIds={highlightableEvidenceIds}
+          onSelectEvidence={setSelectedEvidenceId}
+          onClearHighlight={() => setSelectedEvidenceId(null)} />}
         {showSchematic && <div className="grid items-center gap-3 rounded-xl bg-[#f7f9f5] p-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
           <p className="text-sm text-slate-600">
             Schematic teaching contour for Tone {tone}; illustrative only, not measured TTS or speaker data.
           </p>
           <ToneContour tone={tone} showLabel={false} />
         </div>}
-        <div className="panel space-y-2" aria-label="Exploratory comparison observations">
-          <h4 className="font-semibold">Exploratory observations · not a pronunciation score</h4>
-          {feedback.map(message => <p key={message} className="text-sm text-slate-700">{message}</p>)}
-        </div>
+        {feedback.length > 0 && <details className="rounded-lg border border-[#d7e0d7] p-3">
+          <summary className="cursor-pointer font-semibold">Additional acoustic comparison notes</summary>
+          <div className="mt-2 space-y-2">
+            {feedback.map(message => <p key={message} className="text-sm text-slate-700">{message}</p>)}
+          </div>
+        </details>}
       </>}
       <AcousticInspector learnerFeatures={learnerFeatures} referenceFeatures={referenceFeatures}
         referenceLabel={referenceLabel} comparison={acousticComparison}
@@ -418,7 +466,7 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
       <p className="text-sm text-slate-600">Listen to {referenceLabel} again, or record another take. Any schematic contour remains illustrative and is not measured reference F0.</p>
       <div className="flex flex-wrap gap-2">
         <button type="button" className="button button-secondary"
-          disabled={!referenceAudio.available(reference) || referenceAudio.playing || recording.recording || recording.requesting || recording.playing}
+          disabled={!referenceAudio.available(reference) || referenceAudio.playing || recording.recording || recording.requesting || recording.playing || analyzing}
           onClick={listenToReference}>Listen to reference again</button>
         {recording.blob && <button type="button" className="button button-primary"
           disabled={recording.playing || referenceAudio.playing || analyzing || !recording.supported} onClick={recordAgain}>

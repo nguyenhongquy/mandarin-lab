@@ -54,6 +54,9 @@ function featureValue(features: ToneAcousticFeatures | null, name: string): stri
       return features.pitchRangeSt === null ? 'Not available' : `${features.pitchRangeSt.toFixed(1)} st`
     case 'turning':
       return turningPointLabel(features)
+    case 'prominence':
+      return features.turningPointProminenceSt === null
+        ? 'Not available' : `${features.turningPointProminenceSt.toFixed(1)} st`
     case 'early':
       return slopeLabel(features.earlySlopeSt)
     case 'late':
@@ -83,6 +86,7 @@ const featureRows = [
   ['Net pitch change', 'net'],
   ['Robust pitch range (P10–P90)', 'range'],
   ['Turning point', 'turning'],
+  ['Turning-point prominence', 'prominence'],
   ['Early trend', 'early'],
   ['Late trend', 'late'],
   ['Analysis interval', 'interval'],

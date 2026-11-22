@@ -4,6 +4,7 @@ import { normalizePitchAnalysis, normalizePitchTime } from './pitchComparison'
 import type { ComparisonFrame } from './pitchComparison'
 import { splitPitchSegments } from './pitchPlot'
 import type { ToneAcousticFeatures } from './toneAcoustics'
+import type { NormalizedEvidenceInterval, NormalizedFeedbackHighlight } from './feedback/evidenceHighlight.ts'
 
 export type PitchDisplayMode = 'absolute' | 'relative'
 
@@ -49,6 +50,24 @@ function chartTicks(mode: PitchDisplayMode) {
   return mode === 'absolute'
     ? [100, 200, 300, 400, 500]
     : [-12, -6, 0, 6, 12]
+}
+
+function evidenceBand(
+  interval: NormalizedEvidenceInterval | null,
+  color: string,
+  label: string,
+) {
+  if (!interval) return null
+  const rightEdge = chart.width - chart.right
+  const startX = xPosition(interval.start)
+  const endX = xPosition(interval.end)
+  const width = Math.max(endX - startX, 6)
+  const center = (startX + endX) / 2
+  const x = Math.max(chart.left, Math.min(center - width / 2, rightEdge - width))
+  return <rect key={label} x={x} y={chart.top} width={width} height={plotHeight}
+    fill={color} fillOpacity="0.14" stroke={color} strokeDasharray="4 3">
+    <title>{`${label} evidence interval on normalized voiced time`}</title>
+  </rect>
 }
 
 function featureMarkers(
@@ -101,7 +120,7 @@ function featureMarkers(
 }
 
 export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenceLabel, mode, showLearner, showReference,
-  learnerFeatures = null, referenceFeatures = null, showFeatureMarkers = false }: {
+  learnerFeatures = null, referenceFeatures = null, showFeatureMarkers = false, evidenceHighlight = null }: {
   learnerAnalysis: PitchAnalysis
   referenceAnalysis: PitchAnalysis | null
   referenceLabel: string
@@ -111,6 +130,7 @@ export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenc
   learnerFeatures?: ToneAcousticFeatures | null
   referenceFeatures?: ToneAcousticFeatures | null
   showFeatureMarkers?: boolean
+  evidenceHighlight?: NormalizedFeedbackHighlight | null
 }) {
   const learnerFrames = normalizePitchAnalysis(learnerAnalysis)
   const referenceFrames = referenceAnalysis ? normalizePitchAnalysis(referenceAnalysis) : null
@@ -121,13 +141,14 @@ export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenc
   return <div className="space-y-3">
     <figure>
       <svg viewBox={`0 0 ${chart.width} ${chart.height}`} className="block h-auto w-full"
-        role="img" aria-label={mode === 'absolute'
+        role="img" aria-label={`${mode === 'absolute'
           ? showReference && referenceFrames
             ? `Measured learner and ${referenceLabel} F0 trajectories in Hertz over independently normalized voiced intervals`
             : 'Measured learner F0 trajectory in Hertz over its normalized voiced interval'
           : showReference && referenceFrames
             ? `Measured learner and ${referenceLabel} pitch trajectories in semitones relative to each recording median`
-            : 'Measured learner pitch trajectory in semitones relative to its median'}>
+            : 'Measured learner pitch trajectory in semitones relative to its median'}${evidenceHighlight
+            ? `; selected evidence: ${evidenceHighlight.label}` : ''}`}>
         {ticks.map(tick => <g key={tick}>
           <line x1={chart.left} y1={yPosition(tick, mode)} x2={chart.width - chart.right} y2={yPosition(tick, mode)} stroke="#e1e7e2" />
           <text x={chart.left - 8} y={yPosition(tick, mode) + 4} textAnchor="end" className="pitch-axis-label">
@@ -143,6 +164,10 @@ export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenc
         <line x1={chart.left} y1={chart.top} x2={chart.left} y2={chart.height - chart.bottom} className="contour-axis" />
         <line x1={chart.left} y1={chart.height - chart.bottom} x2={chart.width - chart.right}
           y2={chart.height - chart.bottom} className="contour-axis" />
+        {evidenceHighlight && <>
+          {evidenceBand(evidenceHighlight.reference, '#c26b19', 'Reference')}
+          {evidenceBand(evidenceHighlight.learner, '#9a7307', 'Learner')}
+        </>}
         {showFeatureMarkers && showLearner && learnerFeatures
           && featureMarkers(learnerAnalysis, learnerFeatures, mode, '#24654e', 'Learner')}
         {showFeatureMarkers && showReference && referenceAnalysis && referenceFeatures
@@ -153,6 +178,9 @@ export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenc
           stroke="#24654e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />)}
         {showReference && referenceFrames && pointsFor(referenceFrames, mode, '#c26b19')}
         {showLearner && learnerFrames && pointsFor(learnerFrames, mode, '#153c31')}
+        {evidenceHighlight && <text x={chart.width - chart.right}
+          y={chart.top + (showFeatureMarkers ? 26 : 10)}
+          textAnchor="end" className="pitch-axis-label">Evidence · {evidenceHighlight.label}</text>}
         {showFeatureMarkers && <text x={chart.width - chart.right} y={chart.top + 10}
           textAnchor="end" className="pitch-axis-label">Feature markers use measured timestamps</text>}
         <text x={(chart.left + chart.width - chart.right) / 2} y={chart.height - 8} textAnchor="middle" className="pitch-axis-label">
@@ -165,6 +193,7 @@ export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenc
         {showReference && referenceFrames && <span><i className="legend-line reference" />Measured reference F0 · {referenceLabel}</span>}
         {showLearner && learnerFrames && <span><i className="legend-line measured" />Measured learner F0</span>}
         {showFeatureMarkers && <span>Dashed lines · selected interval and midpoint; outlined point · detected turning point</span>}
+        {evidenceHighlight && <span><i className="legend-line evidence-highlight" />Selected evidence interval · normalized voiced time</span>}
         <span>Unvoiced or low-confidence intervals remain blank; lines do not bridge gaps.</span>
       </figcaption>
     </figure>

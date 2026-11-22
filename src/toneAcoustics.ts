@@ -20,6 +20,7 @@ export interface ToneAcousticFeatures {
   pitchRangeSt: number | null
   turningPointPosition: number | null
   turningPointType: TurningPointType | null
+  turningPointProminenceSt: number | null
   turningPointTime: number | null
   turningPointF0Hz: number | null
   earlySlopeSt: number | null
@@ -416,6 +417,7 @@ function unavailableFeatures(warnings: string[], voicedFrameRatio: number): Tone
     pitchRangeSt: null,
     turningPointPosition: null,
     turningPointType: null,
+    turningPointProminenceSt: null,
     turningPointTime: null,
     turningPointF0Hz: null,
     earlySlopeSt: null,
@@ -527,6 +529,7 @@ export function extractToneFeatures(
     pitchRangeSt: lower === null || upper === null ? null : upper - lower,
     turningPointPosition: turningPoint?.position ?? null,
     turningPointType: turningPoint?.type ?? null,
+    turningPointProminenceSt: turningPoint?.prominence ?? null,
     turningPointTime: turningPoint?.time ?? null,
     turningPointF0Hz: turningPoint?.f0Hz ?? null,
     earlySlopeSt,

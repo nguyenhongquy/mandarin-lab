@@ -58,6 +58,7 @@ function featureFixture(reliability: 'high' | 'medium' | 'low' = 'high') {
     pitchRangeSt: 9,
     turningPointPosition: null,
     turningPointType: null,
+    turningPointProminenceSt: null,
     turningPointTime: null,
     turningPointF0Hz: null,
     earlySlopeSt: 7,
@@ -103,6 +104,7 @@ test('detects meaningful falling-rising and rising-falling turning points', () =
   assert.ok((minimum.turningPointPosition ?? 0) > 0.4 && (minimum.turningPointPosition ?? 1) < 0.6)
   assert.ok(minimum.turningPointTime !== null)
   assert.ok(minimum.turningPointF0Hz !== null)
+  assert.ok((minimum.turningPointProminenceSt ?? 0) >= DEFAULT_TONE_FEATURE_OPTIONS.turningProminenceThresholdSt)
   assert.equal(maximum.direction, 'complex')
   assert.equal(maximum.turningPointType, 'maximum')
 })

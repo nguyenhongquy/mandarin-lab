@@ -81,6 +81,11 @@
   border-style: dashed;
 }
 
+.legend-line.evidence-highlight {
+  border-color: #9a7307;
+  border-top-style: dotted;
+}
+
 .legend-swatch {
   width: 0.8rem;
   height: 0.8rem;

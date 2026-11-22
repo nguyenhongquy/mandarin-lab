@@ -1,6 +1,6 @@
 import { toneDefinition } from './tones.ts'
 import type { MandarinTone } from './tones.ts'
-import type { FeedbackEvidence, ToneFeedback, ToneFeedbackResult } from './feedback/toneFeedbackTypes.ts'
+import type { FeedbackCode, FeedbackEvidence, ToneFeedback, ToneFeedbackResult } from './feedback/toneFeedbackTypes.ts'
 
 interface ToneFeedbackPanelProps {
   tone: MandarinTone
@@ -9,6 +9,7 @@ interface ToneFeedbackPanelProps {
   highlightableEvidenceIds: ReadonlySet<string>
   onSelectEvidence: (evidenceId: string) => void
   onClearHighlight: () => void
+  onPracticeRecommendation: (code: FeedbackCode) => void
 }
 
 function evidenceValue(value: number | string | null): string {
@@ -89,6 +90,7 @@ export function ToneFeedbackPanel({
   highlightableEvidenceIds,
   onSelectEvidence,
   onClearHighlight,
+  onPracticeRecommendation,
 }: ToneFeedbackPanelProps) {
   const target = toneDefinition(tone)
   const primary = result.primary
@@ -114,6 +116,10 @@ export function ToneFeedbackPanel({
       <p className="mt-2 text-sm">{primary.observation}</p>
       <p className="mt-2 text-sm">{primary.explanation}</p>
       <p className="mt-3 text-sm"><strong>Try:</strong> {primary.suggestion}</p>
+      <button type="button" className="button button-secondary mt-3"
+        onClick={() => onPracticeRecommendation(primary.code)}>
+        Practice this suggestion
+      </button>
       {primary.encouragement && <p className="mt-2 text-sm font-medium">{primary.encouragement}</p>}
       <p className="mt-3 text-xs">
         Measurement reliability: {primary.confidence}. {primary.confidenceExplanation}

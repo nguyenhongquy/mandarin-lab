@@ -36,11 +36,11 @@ function pathFor(frames: readonly ComparisonFrame[], mode: PitchDisplayMode): st
   }).join(' '))
 }
 
-function pointsFor(frames: readonly ComparisonFrame[], mode: PitchDisplayMode, color: string) {
+function pointsFor(frames: readonly ComparisonFrame[], mode: PitchDisplayMode, color: string, keyPrefix = 'point') {
   return frames.flatMap((frame, index) => {
     const value = valueFor(frame, mode)
     if (value === null) return []
-    return [<circle key={index} cx={xPosition(frame.normalizedTime)} cy={yPosition(value, mode)} r="1.7" fill={color}>
+    return [<circle key={`${keyPrefix}-${index}`} cx={xPosition(frame.normalizedTime)} cy={yPosition(value, mode)} r="1.7" fill={color}>
       <title>{`${frame.time.toFixed(3)} seconds · ${frame.f0Hz?.toFixed(1)} Hz · confidence ${(frame.confidence * 100).toFixed(0)}%`}</title>
     </circle>]
   })
@@ -119,8 +119,16 @@ function featureMarkers(
   </g>
 }
 
+export interface PitchAttemptTrack {
+  id: string
+  label: string
+  analysis: PitchAnalysis
+  color: string
+}
+
 export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenceLabel, mode, showLearner, showReference,
-  learnerFeatures = null, referenceFeatures = null, showFeatureMarkers = false, evidenceHighlight = null }: {
+  learnerFeatures = null, referenceFeatures = null, showFeatureMarkers = false, evidenceHighlight = null,
+  attemptTracks = [] }: {
   learnerAnalysis: PitchAnalysis
   referenceAnalysis: PitchAnalysis | null
   referenceLabel: string
@@ -131,23 +139,31 @@ export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenc
   referenceFeatures?: ToneAcousticFeatures | null
   showFeatureMarkers?: boolean
   evidenceHighlight?: NormalizedFeedbackHighlight | null
+  attemptTracks?: readonly PitchAttemptTrack[]
 }) {
   const learnerFrames = normalizePitchAnalysis(learnerAnalysis)
   const referenceFrames = referenceAnalysis ? normalizePitchAnalysis(referenceAnalysis) : null
   const learnerPaths = showLearner && learnerFrames ? pathFor(learnerFrames, mode) : []
   const referencePaths = showReference && referenceFrames ? pathFor(referenceFrames, mode) : []
+  const plottedAttempts = attemptTracks.flatMap(track => {
+    const frames = normalizePitchAnalysis(track.analysis)
+    return frames ? [{ ...track, frames, paths: pathFor(frames, mode) }] : []
+  })
   const ticks = chartTicks(mode)
+  const visibleTrajectoryLabels = [
+    ...(showReference && referenceFrames ? [`measured ${referenceLabel} F0`] : []),
+    ...(showLearner && learnerFrames ? ['measured learner F0'] : []),
+    ...plottedAttempts.map(track => track.label),
+  ]
 
   return <div className="space-y-3">
     <figure>
       <svg viewBox={`0 0 ${chart.width} ${chart.height}`} className="block h-auto w-full"
-        role="img" aria-label={`${mode === 'absolute'
-          ? showReference && referenceFrames
-            ? `Measured learner and ${referenceLabel} F0 trajectories in Hertz over independently normalized voiced intervals`
-            : 'Measured learner F0 trajectory in Hertz over its normalized voiced interval'
-          : showReference && referenceFrames
-            ? `Measured learner and ${referenceLabel} pitch trajectories in semitones relative to each recording median`
-            : 'Measured learner pitch trajectory in semitones relative to its median'}${evidenceHighlight
+        role="img" aria-label={`${visibleTrajectoryLabels.length
+          ? `${visibleTrajectoryLabels.join(', ')} ${mode === 'absolute'
+            ? 'trajectories in Hertz'
+            : 'pitch trajectories in semitones relative to each recording median'} over independently normalized voiced intervals`
+          : 'No pitch trajectories selected'}${evidenceHighlight
             ? `; selected evidence: ${evidenceHighlight.label}` : ''}`}>
         {ticks.map(tick => <g key={tick}>
           <line x1={chart.left} y1={yPosition(tick, mode)} x2={chart.width - chart.right} y2={yPosition(tick, mode)} stroke="#e1e7e2" />
@@ -172,12 +188,16 @@ export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenc
           && featureMarkers(learnerAnalysis, learnerFeatures, mode, '#24654e', 'Learner')}
         {showFeatureMarkers && showReference && referenceAnalysis && referenceFeatures
           && featureMarkers(referenceAnalysis, referenceFeatures, mode, '#c26b19', referenceLabel)}
+        {plottedAttempts.flatMap(track => track.paths.map((path, index) =>
+          <path key={`attempt-${track.id}-${index}`} d={path} fill="none" stroke={track.color}
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />))}
         {referencePaths.map((path, index) => <path key={`reference-${index}`} d={path} fill="none"
           stroke="#c26b19" strokeWidth="2.5" strokeDasharray="6 4" strokeLinecap="round" strokeLinejoin="round" />)}
         {learnerPaths.map((path, index) => <path key={`learner-${index}`} d={path} fill="none"
           stroke="#24654e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />)}
-        {showReference && referenceFrames && pointsFor(referenceFrames, mode, '#c26b19')}
-        {showLearner && learnerFrames && pointsFor(learnerFrames, mode, '#153c31')}
+        {plottedAttempts.flatMap(track => pointsFor(track.frames, mode, track.color, `attempt-${track.id}`))}
+        {showReference && referenceFrames && pointsFor(referenceFrames, mode, '#c26b19', 'reference')}
+        {showLearner && learnerFrames && pointsFor(learnerFrames, mode, '#153c31', 'learner')}
         {evidenceHighlight && <text x={chart.width - chart.right}
           y={chart.top + (showFeatureMarkers ? 26 : 10)}
           textAnchor="end" className="pitch-axis-label">Evidence · {evidenceHighlight.label}</text>}
@@ -190,6 +210,9 @@ export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenc
           className="pitch-axis-label">{mode === 'absolute' ? 'F0 (Hz)' : 'Relative pitch (semitones)'}</text>
       </svg>
       <figcaption className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-600">
+        {plottedAttempts.map(track => <span key={track.id}>
+          <i className="legend-line measured" style={{ borderColor: track.color }} />{track.label} · measured F0
+        </span>)}
         {showReference && referenceFrames && <span><i className="legend-line reference" />Measured reference F0 · {referenceLabel}</span>}
         {showLearner && learnerFrames && <span><i className="legend-line measured" />Measured learner F0</span>}
         {showFeatureMarkers && <span>Dashed lines · selected interval and midpoint; outlined point · detected turning point</span>}

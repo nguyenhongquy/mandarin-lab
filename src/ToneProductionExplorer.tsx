@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { decodeAndAnalyze } from './audioDecoder'
 import { AcousticInspector } from './AcousticInspector'
 import { compareToneFeatures } from './acousticComparison'
@@ -7,7 +7,7 @@ import type { PitchDisplayMode } from './F0TrajectoryChart'
 import { comparePitchAnalyses, MIN_COMPARISON_VOICED_FRAMES, normalizePitchAnalysis } from './pitchComparison'
 import { evaluateToneProduction } from './feedback/evaluateToneProduction.ts'
 import { normalizeFeedbackEvidence } from './feedback/evidenceHighlight.ts'
-import type { FeedbackEvidence } from './feedback/toneFeedbackTypes.ts'
+import type { FeedbackCode, FeedbackEvidence } from './feedback/toneFeedbackTypes.ts'
 import { ToneFeedbackPanel } from './ToneFeedbackPanel.tsx'
 import type { PitchAnalysis } from './pitchAnalysis'
 import { extractToneFeatures } from './toneAcoustics'
@@ -20,6 +20,10 @@ import { MAX_RECORDING_SECONDS } from './recordingSupport'
 import { fetchReferenceAudio, loadLocalTtsReferences } from './referenceManifest'
 import { useToneRecording } from './useToneRecording'
 import { ToneContour } from './ToneContour'
+import { GuidedPracticePanel } from './GuidedPracticePanel.tsx'
+import { defaultExerciseForTone, guidedExerciseById, recommendExercise } from './guidedPractice/exercises.ts'
+import { createGuidedPracticeState, guidedPracticeReducer } from './guidedPractice/session.ts'
+import type { PracticeReflection } from './guidedPractice/types.ts'
 
 function timer(seconds: number) {
   return `${seconds.toFixed(1)} / ${MAX_RECORDING_SECONDS.toFixed(1)} seconds`
@@ -27,6 +31,11 @@ function timer(seconds: number) {
 
 export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: ToneReferenceAudioProvider }) {
   const [tone, setTone] = useState<MandarinTone>(1)
+  const [practiceMode, setPracticeMode] = useState<'free' | 'guided'>('free')
+  const [guidedPractice, dispatchGuidedPractice] = useReducer(
+    guidedPracticeReducer,
+    createGuidedPracticeState(1, defaultExerciseForTone(1).id),
+  )
   const [mode, setMode] = useState<PitchDisplayMode>('relative')
   const [analysis, setAnalysis] = useState<PitchAnalysis | null>(null)
   const [referenceAnalysis, setReferenceAnalysis] = useState<PitchAnalysis | null>(null)
@@ -43,6 +52,7 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
   const [showAcousticMarkers, setShowAcousticMarkers] = useState(false)
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null)
   const mountedRef = useRef(false)
+  const attemptCounterRef = useRef(0)
   const recording = useToneRecording()
   const selectedTone = toneDefinition(tone)
   const localReference = localReferences.find(reference => reference.tone === tone && reference.syllable === 'ma')
@@ -80,6 +90,33 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
   const feedback = analysis
     ? [...new Set([...comparisonFeedback, ...analysis.warnings, ...(referenceAnalysis?.warnings ?? [])])]
     : []
+
+  function changeTone(nextTone: MandarinTone) {
+    setTone(nextTone)
+    const currentExercise = guidedExerciseById(guidedPractice.exerciseId)
+    const nextExerciseId = currentExercise?.targetTone === null
+      ? currentExercise.id
+      : defaultExerciseForTone(nextTone).id
+    dispatchGuidedPractice({ type: 'select-exercise', exerciseId: nextExerciseId, tone: nextTone })
+    setUseBrowserFallback(false)
+    setAnalysis(null)
+    setReferenceAnalysis(null)
+    setSelectedEvidenceId(null)
+    setAnalysisError('')
+    setReferenceAnalysisWarning('')
+  }
+
+  function selectGuidedExercise(exerciseId: string, selectedTone: MandarinTone) {
+    const exercise = guidedExerciseById(exerciseId)
+    if (!exercise || (exercise.targetTone !== null && exercise.targetTone !== selectedTone)) return
+    dispatchGuidedPractice({ type: 'select-exercise', exerciseId, tone: selectedTone })
+  }
+
+  function practiceFeedback(code: FeedbackCode) {
+    const exercise = recommendExercise(tone, code)
+    dispatchGuidedPractice({ type: 'select-exercise', exerciseId: exercise.id, tone })
+    setPracticeMode('guided')
+  }
 
   useEffect(() => {
     mountedRef.current = true
@@ -121,26 +158,52 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
       const learnerResult = await decodeAndAnalyze(recording.blob)
       if (!mountedRef.current) return
       setAnalysis(learnerResult)
+      let measuredReference: PitchAnalysis | null = null
       if (reference.source === 'browser-tts') {
         setReferenceAnalysis(null)
         setReferenceAnalysisWarning('Browser TTS is available for listening only; measured reference F0 comparison is unavailable.')
-        return
+      } else {
+        try {
+          const referenceBlob = await fetchReferenceAudio(reference)
+          const result = await decodeAndAnalyze(referenceBlob)
+          if (!mountedRef.current) return
+          measuredReference = result
+          setReferenceAnalysis(result)
+          if (result.voicedFrameCount < MIN_COMPARISON_VOICED_FRAMES || !normalizePitchAnalysis(result)) {
+            setReferenceAnalysisWarning('The local reference was analyzed, but it contains too few reliable voiced frames for comparison.')
+          }
+        } catch (problem) {
+          if (mountedRef.current) {
+            setReferenceAnalysis(null)
+            setReferenceAnalysisWarning(problem instanceof Error
+              ? `The learner analysis is ready, but the local reference could not be analyzed: ${problem.message} Playback remains available.`
+              : 'The learner analysis is ready, but local reference analysis failed. Playback remains available.')
+          }
+        }
       }
-      try {
-        const referenceBlob = await fetchReferenceAudio(reference)
-        const result = await decodeAndAnalyze(referenceBlob)
-        if (!mountedRef.current) return
-        setReferenceAnalysis(result)
-        if (result.voicedFrameCount < MIN_COMPARISON_VOICED_FRAMES || !normalizePitchAnalysis(result)) {
-          setReferenceAnalysisWarning('The local reference was analyzed, but it contains too few reliable voiced frames for comparison.')
-        }
-      } catch (problem) {
-        if (mountedRef.current) {
-          setReferenceAnalysis(null)
-          setReferenceAnalysisWarning(problem instanceof Error
-            ? `The learner analysis is ready, but the local reference could not be analyzed: ${problem.message} Playback remains available.`
-            : 'The learner analysis is ready, but local reference analysis failed. Playback remains available.')
-        }
+      if (practiceMode === 'guided' && mountedRef.current) {
+        const features = extractToneFeatures(learnerResult)
+        const referenceFeatures = measuredReference ? extractToneFeatures(measuredReference) : null
+        const result = evaluateToneProduction({
+          tone,
+          learnerFeatures: features,
+          referenceFeatures,
+          referenceSource: reference.source,
+        })
+        attemptCounterRef.current += 1
+        dispatchGuidedPractice({
+          type: 'attempt-analyzed',
+          attempt: {
+            id: `guided-${Date.now()}-${attemptCounterRef.current}`,
+            exerciseId: guidedPractice.exerciseId,
+            tone,
+            timestamp: Date.now(),
+            acousticFeatures: features,
+            feedbackCode: result.primary.code,
+            analysisReliability: features.reliability,
+            pitchAnalysis: learnerResult,
+          },
+        })
       }
     } catch (problem) {
       if (mountedRef.current) {
@@ -189,6 +252,16 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
     void recording.startRecording()
   }
 
+  function startGuidedRecording() {
+    dispatchGuidedPractice({ type: 'attempt-started' })
+    startRecording()
+  }
+
+  function recordGuidedAttemptAgain() {
+    dispatchGuidedPractice({ type: 'attempt-started' })
+    recordAgain()
+  }
+
   function chooseBrowserFallback() {
     if (analyzing || referenceAudio.playing) return
     setUseBrowserFallback(true)
@@ -214,6 +287,16 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
       </p>
     </div>
 
+    <div role="group" aria-label="Production practice mode" className="flex flex-wrap gap-2">
+      <button type="button" className={practiceMode === 'free' ? 'button button-primary' : 'button button-secondary'}
+        aria-pressed={practiceMode === 'free'} disabled={analyzing}
+        onClick={() => setPracticeMode('free')}>Free Exploration</button>
+      <button type="button" className={practiceMode === 'guided' ? 'button button-primary' : 'button button-secondary'}
+        aria-pressed={practiceMode === 'guided'} disabled={analyzing}
+        onClick={() => setPracticeMode('guided')}>Guided Practice</button>
+    </div>
+
+    <div hidden={practiceMode !== 'free'} className="space-y-5">
     <section className="panel space-y-4" aria-labelledby="step-1-heading">
       <div>
         <p className="eyebrow">Step 1</p>
@@ -223,18 +306,10 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
         <label className="block text-sm font-medium">
           Syllable and target tone
           <select className="mt-1 block w-full rounded-lg border border-[#cdd9cd] bg-white p-2"
-            value={tone} disabled={recording.recording || recording.requesting || Boolean(recording.blob) || referenceAudio.playing}
+            value={tone} disabled={recording.recording || recording.requesting || Boolean(recording.blob) || referenceAudio.playing || analyzing}
             onChange={event => {
               const nextTone = toneDefinitions.find(item => item.tone === Number(event.currentTarget.value))
-              if (nextTone) {
-                setTone(nextTone.tone)
-                setUseBrowserFallback(false)
-                setAnalysis(null)
-                setReferenceAnalysis(null)
-                setSelectedEvidenceId(null)
-                setAnalysisError('')
-                setReferenceAnalysisWarning('')
-              }
+              if (nextTone) changeTone(nextTone.tone)
             }}>
             {toneDefinitions.map(item => <option value={item.tone} key={item.tone}>
               Tone {item.tone} · {item.pinyin} · {item.hanzi}
@@ -439,7 +514,8 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
           selectedEvidenceId={selectedEvidenceId}
           highlightableEvidenceIds={highlightableEvidenceIds}
           onSelectEvidence={setSelectedEvidenceId}
-          onClearHighlight={() => setSelectedEvidenceId(null)} />}
+          onClearHighlight={() => setSelectedEvidenceId(null)}
+          onPracticeRecommendation={practiceFeedback} />}
         {showSchematic && <div className="grid items-center gap-3 rounded-xl bg-[#f7f9f5] p-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
           <p className="text-sm text-slate-600">
             Schematic teaching contour for Tone {tone}; illustrative only, not measured TTS or speaker data.
@@ -474,5 +550,27 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
         </button>}
       </div>
     </section>
+    </div>
+
+    <div hidden={practiceMode !== 'guided'}>
+      <GuidedPracticePanel state={guidedPractice} tone={tone} reference={reference}
+        referenceAudio={referenceAudio} referenceLoading={referenceLoading}
+        referenceAnalysis={referenceAnalysis} referenceCanPlot={referenceCanPlot}
+        referenceAnalysisWarning={referenceAnalysisWarning} analysisError={analysisError}
+        analyzing={analyzing}
+        recording={recording} mode={mode}
+        onModeChange={setMode} onToneChange={changeTone}
+        onSelectExercise={selectGuidedExercise}
+        onStartRecording={startGuidedRecording}
+        onStopRecording={recording.stopRecording}
+        onRecordAgain={recordGuidedAttemptAgain}
+        onDiscardRecording={discard}
+        onAnalyze={() => void analyze()}
+        onSaveReflection={(attemptId, reflection: PracticeReflection) =>
+          dispatchGuidedPractice({ type: 'save-reflection', attemptId, reflection })}
+        onSelectComparison={attemptIds =>
+          dispatchGuidedPractice({ type: 'select-comparison', attemptIds })}
+        onClearHistory={() => dispatchGuidedPractice({ type: 'clear-history' })} />
+    </div>
   </section>
 }

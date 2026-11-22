@@ -21,9 +21,14 @@ export function audioSourceFor(example: ToneExample): ToneAudioSource {
 }
 
 export function audioSourceForReference(reference: ToneReference): ToneAudioSource {
-  if (reference.source === 'recorded') {
-    if (!reference.audioUrl) throw new Error(`Recorded reference ${reference.id} has no audio URL.`)
-    return { kind: 'local', url: reference.audioUrl, label: 'Recorded reference' }
+  if (reference.source === 'browser-tts') {
+    return audioSourceFor(toneExample(reference.tone))
   }
-  return audioSourceFor(toneExample(reference.tone))
+  if (!reference.audioUrl) {
+    throw new Error(`Reference ${reference.id} has no audio URL.`)
+  }
+  if (reference.source === 'local-tts' || reference.source === 'corpus') {
+    return { kind: 'local', url: reference.audioUrl, label: `${reference.source} reference` }
+  }
+  throw new Error(`Reference ${reference.id} has an unsupported source.`)
 }

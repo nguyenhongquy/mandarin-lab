@@ -49,7 +49,7 @@ export function useToneAudio() {
     availableReference(reference: ToneReference) {
       try {
         const source = audioSourceForReference(reference)
-        return source.kind === 'local' || Boolean(synthesis && voice)
+        return source.kind === 'local' ? Boolean(reference.audioUrl) : Boolean(synthesis && voice)
       } catch {
         return false
       }

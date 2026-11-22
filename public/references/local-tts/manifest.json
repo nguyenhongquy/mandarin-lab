@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "references": [
+    {
+      "id": "local-tts-ma-tone-1",
+      "syllable": "ma",
+      "hanzi": "妈",
+      "pinyin": "mā",
+      "tone": 1,
+      "source": "local-tts",
+      "audioFile": "ma1.wav",
+      "voiceName": "Eddy (Chinese (China mainland))",
+      "language": "zh_CN",
+      "generationMethod": "macOS say + afconvert"
+    },
+    {
+      "id": "local-tts-ma-tone-2",
+      "syllable": "ma",
+      "hanzi": "麻",
+      "pinyin": "má",
+      "tone": 2,
+      "source": "local-tts",
+      "audioFile": "ma2.wav",
+      "voiceName": "Eddy (Chinese (China mainland))",
+      "language": "zh_CN",
+      "generationMethod": "macOS say + afconvert"
+    },
+    {
+      "id": "local-tts-ma-tone-3",
+      "syllable": "ma",
+      "hanzi": "马",
+      "pinyin": "mǎ",
+      "tone": 3,
+      "source": "local-tts",
+      "audioFile": "ma3.wav",
+      "voiceName": "Eddy (Chinese (China mainland))",
+      "language": "zh_CN",
+      "generationMethod": "macOS say + afconvert"
+    },
+    {
+      "id": "local-tts-ma-tone-4",
+      "syllable": "ma",
+      "hanzi": "骂",
+      "pinyin": "mà",
+      "tone": 4,
+      "source": "local-tts",
+      "audioFile": "ma4.wav",
+      "voiceName": "Eddy (Chinese (China mainland))",
+      "language": "zh_CN",
+      "generationMethod": "macOS say + afconvert"
+    }
+  ]
+}

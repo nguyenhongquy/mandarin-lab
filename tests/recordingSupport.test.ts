@@ -49,3 +49,14 @@ test('decoded PCM is analyzed locally and the AudioContext is closed afterward',
   assert.ok(Math.abs((analysis.medianF0Hz ?? 0) - 200) < 5)
   assert.equal(closed, true)
 })
+
+test('reference decode failures surface and still close the AudioContext', async () => {
+  let closed = false
+  const context = {
+    state: 'running' as AudioContextState,
+    async decodeAudioData() { throw new Error('unsupported reference codec') },
+    async close() { closed = true },
+  }
+  await assert.rejects(decodeAndAnalyze(new Blob(['invalid audio']), () => context), /unsupported reference codec/)
+  assert.equal(closed, true)
+})

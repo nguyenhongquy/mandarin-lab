@@ -2,14 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { decodeAndAnalyze } from './audioDecoder'
 import { F0TrajectoryChart } from './F0TrajectoryChart'
 import type { PitchDisplayMode } from './F0TrajectoryChart'
-import { pitchFeedback } from './pitchAnalysis'
+import { comparePitchAnalyses, MIN_COMPARISON_VOICED_FRAMES, normalizePitchAnalysis } from './pitchComparison'
 import type { PitchAnalysis } from './pitchAnalysis'
-import { schematicToneReference } from './toneReferences'
+import { browserTtsReference, referenceSourceLabel } from './toneReferences'
+import type { ToneReference } from './toneReferences'
 import type { ToneReferenceAudioProvider } from './toneReferences'
 import { toneDefinition, toneDefinitions } from './tones'
 import type { MandarinTone } from './tones'
 import { MAX_RECORDING_SECONDS } from './recordingSupport'
+import { fetchReferenceAudio, loadLocalTtsReferences } from './referenceManifest'
 import { useToneRecording } from './useToneRecording'
+import { ToneContour } from './ToneContour'
 
 function timer(seconds: number) {
   return `${seconds.toFixed(1)} / ${MAX_RECORDING_SECONDS.toFixed(1)} seconds`
@@ -19,14 +22,33 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
   const [tone, setTone] = useState<MandarinTone>(1)
   const [mode, setMode] = useState<PitchDisplayMode>('relative')
   const [analysis, setAnalysis] = useState<PitchAnalysis | null>(null)
+  const [referenceAnalysis, setReferenceAnalysis] = useState<PitchAnalysis | null>(null)
   const [analysisError, setAnalysisError] = useState('')
+  const [referenceAnalysisWarning, setReferenceAnalysisWarning] = useState('')
+  const [referenceCatalogWarning, setReferenceCatalogWarning] = useState('')
+  const [localReferences, setLocalReferences] = useState<ToneReference[]>([])
+  const [referenceLoading, setReferenceLoading] = useState(true)
+  const [useBrowserFallback, setUseBrowserFallback] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
+  const [showReference, setShowReference] = useState(true)
+  const [showLearner, setShowLearner] = useState(true)
+  const [showSchematic, setShowSchematic] = useState(true)
   const mountedRef = useRef(false)
   const recording = useToneRecording()
   const selectedTone = toneDefinition(tone)
-  const reference = schematicToneReference(tone)
+  const localReference = localReferences.find(reference => reference.tone === tone && reference.syllable === 'ma')
+  const reference = useBrowserFallback || !localReference ? browserTtsReference(tone) : localReference
+  const referenceLabel = referenceSourceLabel(reference.source)
+  const referenceCanPlot = Boolean(referenceAnalysis && normalizePitchAnalysis(referenceAnalysis))
+  const comparisonFeedback = analysis
+    ? referenceAnalysis
+      ? comparePitchAnalyses(referenceAnalysis, analysis)
+      : [reference.source === 'browser-tts'
+        ? 'Measured reference F0 is unavailable; browser TTS is audio-only, so comparison feedback is withheld.'
+        : 'Reference F0 analysis is unavailable; comparison feedback is withheld.']
+    : []
   const feedback = analysis
-    ? [...new Set([...pitchFeedback(analysis), ...analysis.warnings])]
+    ? [...new Set([...comparisonFeedback, ...analysis.warnings, ...(referenceAnalysis?.warnings ?? [])])]
     : []
 
   useEffect(() => {
@@ -37,17 +59,59 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
     }
   }, [referenceAudio.stop])
 
+  useEffect(() => {
+    let active = true
+    void loadLocalTtsReferences().then(result => {
+      if (!active) return
+      setLocalReferences(result.references)
+      setReferenceCatalogWarning(result.warnings.join(' '))
+    }).catch(problem => {
+      if (active) setReferenceCatalogWarning(problem instanceof Error
+        ? `Local TTS references could not be loaded: ${problem.message}`
+        : 'Local TTS references could not be loaded.')
+    }).finally(() => {
+      if (active) setReferenceLoading(false)
+    })
+    return () => { active = false }
+  }, [])
+
   async function analyze() {
     if (!recording.blob || recording.recording || recording.playing || referenceAudio.playing || analyzing) return
     setAnalyzing(true)
     setAnalysisError('')
+    setReferenceAnalysisWarning('')
     try {
-      const result = await decodeAndAnalyze(recording.blob)
-      if (mountedRef.current) setAnalysis(result)
+      const learnerResult = await decodeAndAnalyze(recording.blob)
+      if (!mountedRef.current) return
+      setAnalysis(learnerResult)
+      if (reference.source === 'browser-tts') {
+        setReferenceAnalysis(null)
+        setReferenceAnalysisWarning('Browser TTS is available for listening only; measured reference F0 comparison is unavailable.')
+        return
+      }
+      try {
+        const referenceBlob = await fetchReferenceAudio(reference)
+        const result = await decodeAndAnalyze(referenceBlob)
+        if (!mountedRef.current) return
+        setReferenceAnalysis(result)
+        if (result.voicedFrameCount < MIN_COMPARISON_VOICED_FRAMES || !normalizePitchAnalysis(result)) {
+          setReferenceAnalysisWarning('The local reference was analyzed, but it contains too few reliable voiced frames for comparison.')
+        }
+      } catch (problem) {
+        if (mountedRef.current) {
+          setReferenceAnalysis(null)
+          setReferenceAnalysisWarning(problem instanceof Error
+            ? `The learner analysis is ready, but the local reference could not be analyzed: ${problem.message} Playback remains available.`
+            : 'The learner analysis is ready, but local reference analysis failed. Playback remains available.')
+        }
+      }
     } catch (problem) {
-      if (mountedRef.current) setAnalysisError(problem instanceof Error
-        ? problem.message
-        : 'Could not decode the recording for local pitch analysis.')
+      if (mountedRef.current) {
+        setAnalysis(null)
+        setAnalysisError(problem instanceof Error
+          ? problem.message
+          : 'Could not decode the learner recording for local pitch analysis.')
+      }
     } finally {
       if (mountedRef.current) setAnalyzing(false)
     }
@@ -56,12 +120,14 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
   function discard() {
     recording.discard()
     setAnalysis(null)
+    setReferenceAnalysis(null)
     setAnalysisError('')
+    setReferenceAnalysisWarning('')
   }
 
   function listenToReference() {
     if (recording.recording || recording.requesting || recording.playing || referenceAudio.playing
-      || !referenceAudio.available(reference)) return
+      || referenceLoading || !referenceAudio.available(reference)) return
     void referenceAudio.play(reference)
   }
 
@@ -78,6 +144,18 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
   function recordAgain() {
     discard()
     void recording.startRecording()
+  }
+
+  function chooseBrowserFallback() {
+    setUseBrowserFallback(true)
+    setReferenceAnalysis(null)
+    setReferenceAnalysisWarning('Browser TTS is available for listening only; measured reference F0 comparison is unavailable.')
+  }
+
+  function chooseLocalReference() {
+    setUseBrowserFallback(false)
+    setReferenceAnalysis(null)
+    setReferenceAnalysisWarning('')
   }
 
   return <section className="space-y-5" aria-labelledby="production-heading">
@@ -101,7 +179,12 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
             value={tone} disabled={recording.recording || recording.requesting || Boolean(recording.blob) || referenceAudio.playing}
             onChange={event => {
               const nextTone = toneDefinitions.find(item => item.tone === Number(event.currentTarget.value))
-              if (nextTone) setTone(nextTone.tone)
+              if (nextTone) {
+                setTone(nextTone.tone)
+                setUseBrowserFallback(false)
+                setReferenceAnalysis(null)
+                setReferenceAnalysisWarning('')
+              }
             }}>
             {toneDefinitions.map(item => <option value={item.tone} key={item.tone}>
               Tone {item.tone} · {item.pinyin} · {item.hanzi}
@@ -124,22 +207,42 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
           <p className="eyebrow">Step 2</p>
           <h3 className="mt-1 text-lg font-semibold" id="step-2-heading">Listen to the reference</h3>
         </div>
-        <span className="rounded-full bg-[#fff7e8] px-3 py-1 text-xs font-semibold text-[#704d17]">Browser TTS — prototype</span>
+        <span className="rounded-full bg-[#fff7e8] px-3 py-1 text-xs font-semibold text-[#704d17]">{referenceLabel}</span>
       </div>
-      <p className="text-sm text-slate-600">
-        This reference is synthesized by your browser, not a validated native-speaker recording. Speech synthesis does not expose its audio PCM here, so no TTS F0 is measured or plotted.
-      </p>
-      <p className="text-sm text-slate-600" role="status" aria-live="polite">
-        {referenceAudio.playing ? 'Playing Browser TTS reference…' : referenceAudio.status}
-      </p>
+      {referenceLoading
+        ? <p className="text-sm text-slate-600" role="status">Checking for generated local TTS references…</p>
+        : reference.source === 'browser-tts'
+          ? <p className="text-sm text-slate-600">
+            No generated local audio is available for this tone. Browser TTS is for listening only; its PCM is not exposed here, so measured reference F0 comparison is unavailable.
+          </p>
+          : <p className="text-sm text-slate-600">
+            This locally generated voice is synthetic, not a phonetically authoritative or human-speaker reference.
+            {reference.voiceName && ` Voice: ${reference.voiceName}.`}
+          </p>}
+      {!referenceLoading && reference.source === 'browser-tts' && <p className="text-sm text-slate-600" role="status" aria-live="polite">
+        {referenceAudio.playing ? 'Playing Browser TTS prototype…' : referenceAudio.status}
+      </p>}
+      {!referenceLoading && reference.source !== 'browser-tts' && <p className="text-sm text-slate-600" role="status" aria-live="polite">
+        {referenceAudio.playing ? `Playing ${referenceLabel}…` : `Ready · ${reference.language ?? 'local audio'}`}
+      </p>}
+      {referenceCatalogWarning && <p role="status" className="text-sm text-[#704d17]">{referenceCatalogWarning}</p>}
       {referenceAudio.error && <p role="alert" className="text-sm text-[#8f3b2e]">{referenceAudio.error}</p>}
       <div className="flex flex-wrap gap-2">
         <button type="button" className="button button-primary"
           disabled={!referenceAudio.available(reference) || referenceAudio.playing || recording.recording
-            || recording.requesting || recording.playing}
+            || recording.requesting || recording.playing || referenceLoading}
           onClick={listenToReference}>
           Listen to reference
         </button>
+        {localReference && !useBrowserFallback && <button type="button" className="button button-secondary"
+          disabled={referenceAudio.playing || recording.recording || recording.requesting || recording.playing}
+          onClick={chooseBrowserFallback}>
+          Use Browser TTS fallback
+        </button>}
+        {localReference && useBrowserFallback && <button type="button" className="button button-secondary"
+          disabled={referenceAudio.playing} onClick={chooseLocalReference}>
+          Use local TTS reference
+        </button>}
         {referenceAudio.playing && <button type="button" className="button button-secondary" onClick={referenceAudio.stop}>
           Stop reference
         </button>}
@@ -204,21 +307,27 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="eyebrow">Step 5</p>
-          <h3 className="mt-1 text-xl font-semibold" id="step-5-heading">Inspect your pitch trajectory</h3>
+          <h3 className="mt-1 text-xl font-semibold" id="step-5-heading">Compare measured pitch trajectories</h3>
         </div>
         <p className="text-sm text-slate-600" role="status" aria-live="polite">
-          {analyzing ? 'Analysis in progress…' : analysis ? 'Analysis ready · measured learner F0' : 'Not analyzed yet'}
+          {analyzing ? 'Analysis in progress…' : analysis
+            ? referenceAnalysis ? referenceCanPlot ? 'Both recordings analyzed · measured F0' : 'Reference analyzed · too few reliable frames'
+              : 'Learner analyzed · measured reference F0 unavailable'
+            : 'Not analyzed yet'}
         </p>
       </div>
       <button type="button" className="button button-primary"
-        disabled={!recording.blob || recording.recording || recording.playing || referenceAudio.playing || analyzing}
+        disabled={!recording.blob || recording.recording || recording.playing || referenceAudio.playing || analyzing || referenceLoading}
         onClick={() => void analyze()}>
-        {analyzing ? 'Analyzing locally…' : 'Analyze pronunciation'}
+        {analyzing ? 'Analyzing locally…' : reference.source === 'browser-tts' ? 'Analyze learner recording' : 'Analyze both recordings'}
       </button>
       {analysisError && <p role="alert" className="text-sm text-[#8f3b2e]">{analysisError}</p>}
+      {referenceAnalysisWarning && <p role="status" className="rounded-lg bg-[#fff7e8] p-3 text-sm text-[#704d17]">
+        {referenceAnalysisWarning}
+      </p>}
       {analysis && <>
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <p className="text-sm font-semibold">Measured learner F0 · schematic teaching contour remains illustrative only</p>
+          <p className="text-sm font-semibold">Measured learner F0 and, when available, measured reference F0</p>
           <label className="text-sm font-medium">
             Display
             <select className="ml-2 rounded-lg border border-[#cdd9cd] bg-white p-2" value={mode}
@@ -226,6 +335,28 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
               <option value="relative">Relative pitch</option>
               <option value="absolute">Absolute pitch (Hz)</option>
             </select>
+          </label>
+        </div>
+        <p className="text-xs text-slate-600">
+          {mode === 'absolute'
+            ? 'Both trajectories use the same Hz axis. Absolute pitch differences are preserved; you do not need to match the synthetic voice’s pitch.'
+            : 'Each recording is normalized independently to its own median F0. This emphasizes contour shape, not absolute pitch.'}
+        </p>
+        <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={showReference} disabled={!referenceCanPlot}
+              onChange={event => setShowReference(event.currentTarget.checked)} />
+            Reference trajectory
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={showLearner}
+              onChange={event => setShowLearner(event.currentTarget.checked)} />
+            Learner trajectory
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={showSchematic}
+              onChange={event => setShowSchematic(event.currentTarget.checked)} />
+            Schematic teaching contour
           </label>
         </div>
         <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
@@ -236,12 +367,30 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
             {analysis.minF0Hz === null || analysis.maxF0Hz === null ? 'Unavailable' : `${analysis.minF0Hz.toFixed(1)}–${analysis.maxF0Hz.toFixed(1)} Hz`}
           </dd></div>
         </dl>
+        {referenceAnalysis && <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <div className="rounded-lg bg-[#fff7e8] p-3">
+            <dt className="text-slate-600">Reference median F0 · {referenceLabel}</dt>
+            <dd className="mt-1 font-semibold">{referenceAnalysis.medianF0Hz === null
+              ? 'Unavailable' : `${referenceAnalysis.medianF0Hz.toFixed(1)} Hz`}</dd>
+          </div>
+          <div className="rounded-lg bg-[#fff7e8] p-3">
+            <dt className="text-slate-600">Reference voiced frames</dt>
+            <dd className="mt-1 font-semibold">{referenceAnalysis.voicedFrameCount} · {referenceAnalysis.voicedPercent}%</dd>
+          </div>
+        </dl>}
         <p className="text-xs text-slate-600">
-          Learner F0 is measured from your recording, not ground truth. The schematic is a teaching contour, not TTS data or a real speaker. Relative pitch is calculated against your recording's median; the time axis is normalized and hover points for original timestamps.
+          F0 values are measurements from audio, not ground truth. The 0–100% time axis independently normalizes each recording's reliable voiced interval; this approximate alignment does not establish phonetic segment correspondence. Hover over points for original timestamps. Unvoiced gaps remain disconnected.
         </p>
-        <F0TrajectoryChart analysis={analysis} mode={mode} reference={reference} />
-        <div className="panel space-y-2" aria-label="Descriptive feedback">
-          <h4 className="font-semibold">What the detector observed</h4>
+        <F0TrajectoryChart learnerAnalysis={analysis} referenceAnalysis={referenceAnalysis}
+          referenceLabel={referenceLabel} mode={mode} showLearner={showLearner} showReference={showReference} />
+        {showSchematic && <div className="grid items-center gap-3 rounded-xl bg-[#f7f9f5] p-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
+          <p className="text-sm text-slate-600">
+            Schematic teaching contour for Tone {tone}; illustrative only, not measured TTS or speaker data.
+          </p>
+          <ToneContour tone={tone} showLabel={false} />
+        </div>}
+        <div className="panel space-y-2" aria-label="Exploratory comparison observations">
+          <h4 className="font-semibold">Exploratory observations · not a pronunciation score</h4>
           {feedback.map(message => <p key={message} className="text-sm text-slate-700">{message}</p>)}
         </div>
       </>}
@@ -252,7 +401,7 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
         <p className="eyebrow">Step 6</p>
         <h3 className="mt-1 text-lg font-semibold" id="step-6-heading">Repeat the practice</h3>
       </div>
-      <p className="text-sm text-slate-600">Listen to the browser-TTS prototype again, or record another take. The TTS audio and schematic contour are not measured reference F0.</p>
+      <p className="text-sm text-slate-600">Listen to {referenceLabel} again, or record another take. Any schematic contour remains illustrative and is not measured reference F0.</p>
       <div className="flex flex-wrap gap-2">
         <button type="button" className="button button-secondary"
           disabled={!referenceAudio.available(reference) || referenceAudio.playing || recording.recording || recording.requesting || recording.playing}

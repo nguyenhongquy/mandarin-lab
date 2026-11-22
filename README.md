@@ -34,12 +34,29 @@ Session summaries are saved in browser localStorage under `mandarin-speechlab.se
 
 ## Tone Production Explorer
 
-The practice sequence is: choose one of the four `ma` tones, listen to the reference, record your pronunciation for up to five seconds, replay it, analyze it, and repeat. The reference is labeled **Browser TTS — prototype**. It reuses the Phase 1 browser speech provider, selects an available `zh-CN`/`zh-Hans-CN` voice, and reports when speech synthesis or a Mandarin voice is unavailable. Recording uses `getUserMedia` and `MediaRecorder`; decoding uses Web Audio.
+The practice sequence is: choose one of the four `ma` tones, listen to a reference, record your pronunciation for up to five seconds, replay it, analyze both recordings when a local reference exists, and repeat. Local recordings are labeled **Local TTS — synthetic reference**. If the generated file is absent or unavailable, the app falls back to **Browser TTS — prototype**, which is listening-only. Browser playback reuses the Phase 1 speech provider, selects an available `zh-CN`/`zh-Hans-CN` voice, and reports when speech synthesis or a Mandarin voice is unavailable. Recording uses `getUserMedia` and `MediaRecorder`; audio decoding uses Web Audio.
 
-Browser TTS is not a validated native-speaker recording. Voice identity, accent, tone realization, and audio quality depend on the browser and installed system voices. `speechSynthesis.speak()` does not expose its rendered PCM through this interface, so the app does not estimate or fabricate a TTS F0 trajectory.
+Browser TTS is not a validated native-speaker recording. Voice identity, accent, tone realization, and audio quality depend on the browser and installed system voices. `speechSynthesis.speak()` does not expose its rendered PCM through this interface, so the app does not estimate or fabricate a browser-TTS F0 trajectory.
 
-F0 is estimated from the learner's recording with a lightweight YIN difference-function implementation using overlapping 35 ms frames and 10 ms hops, with a default 70–500 Hz acceptance range.
+### Generate local TTS references on macOS
 
-Analysis displays absolute Hz or semitone movement relative to the recording's median F0. Unvoiced and low-confidence frames remain gaps. The relative view places the existing schematic tone contour beside the learner's measured trajectory; it is illustrative only and is never drawn as measured data on the absolute-Hz chart. Feedback describes detected movement and does not score or classify pronunciation.
+The app reads the explicit syllable, tone, audio filename, voice, and language mapping in `public/references/local-tts/manifest.json`. The checked-in manifest is empty until local audio is generated; missing files are skipped with a warning and Browser TTS remains available.
 
-The recorded-reference interface can accept local or hosted audio URLs, speaker IDs, and measured F0 metadata in a future corpus phase; no ManDi recordings are downloaded or bundled now. Raw learner recordings and analysis results stay in page memory, are not uploaded or saved automatically, and are released when the production module is left or the recording is discarded. Browser microphone and Web Audio support are required. The estimator is intended for practice and observation, not as ground-truth phonetic measurement; no pronunciation scores are produced.
+List available Mandarin-capable macOS voices, then pass the exact installed voice name (do not assume a voice such as Tingting is present):
+
+```sh
+node scripts/generate-local-tts.mjs --list-voices
+node scripts/generate-local-tts.mjs --voice "Exact voice name from the list"
+```
+
+The developer-side script uses `say` with the four Chinese characters and `afconvert` to create stable `ma1.wav`–`ma4.wav` PCM files and update the manifest. Re-running it replaces the generated files. It does not run in the browser or contact a service. Check the applicable [Apple software license](https://www.apple.com/legal/sla/) and any voice-specific terms before committing or redistributing generated audio; no voice-generated recordings are bundled in this repository.
+
+The temporary voice output used to validate generation was not retained or committed, and its redistribution terms were not verified. Review the terms for the exact installed voice before publishing generated files.
+
+When a local file is available, the browser loads it, decodes it, and runs the same Phase 2A YIN analyzer used for learner audio. If reference decoding fails, the warning does not prevent reference playback or learner analysis. Browser-TTS fallback audio is never analyzed as measured reference F0.
+
+F0 uses overlapping 35 ms frames and 10 ms hops, with a default 70–500 Hz acceptance range. The comparison offers absolute Hz on one shared scale and relative semitones normalized independently to each recording's median F0. Each reliable voiced interval is mapped to 0–100%; internal unvoiced gaps remain disconnected and hover points retain original timestamps. This simple time normalization is approximate and does not establish phonetic segment correspondence; dynamic time warping is not used. The absolute view preserves speaker pitch differences and does not imply the learner should match the synthetic voice's absolute pitch.
+
+The reference and learner trajectories and the schematic teaching contour can be toggled separately. The schematic is illustrative, is not derived from audio, and is never presented as measured F0. Exploratory comparison feedback is withheld when either measured track has too few reliable voiced frames; it does not score pronunciation or judge tone correctness.
+
+The provider-independent reference model can represent local TTS, browser TTS, or future corpus recordings with audio URL, speaker, voice, language, and measured F0 metadata. No ManDi recordings are downloaded or bundled. Raw learner recordings and analyses stay in page memory, are not uploaded or saved automatically, and are released when the production module is left or the recording is discarded. Browser microphone and Web Audio support are required. F0 is intended for practice and observation, not as ground-truth phonetic measurement.

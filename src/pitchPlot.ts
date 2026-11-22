@@ -1,9 +1,9 @@
 import { DEFAULT_PITCH_OPTIONS, relativeSemitones } from './pitchAnalysis.ts'
 import type { PitchFrame } from './pitchAnalysis.ts'
 
-export function splitPitchSegments(frames: readonly PitchFrame[]): PitchFrame[][] {
-  const segments: PitchFrame[][] = []
-  let current: PitchFrame[] = []
+export function splitPitchSegments<T extends PitchFrame>(frames: readonly T[]): T[][] {
+  const segments: T[][] = []
+  let current: T[] = []
   for (const frame of frames) {
     if (frame.f0Hz === null || frame.confidence < DEFAULT_PITCH_OPTIONS.confidenceThreshold) {
       if (current.length) segments.push(current)

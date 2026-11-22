@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createToneAudioPlayer, mandarinVoices, prototypeAudioStatus } from '../src/toneAudio.ts'
 import { audioSourceForReference } from '../src/audioSources.ts'
-import { schematicToneReference } from '../src/toneReferences.ts'
+import { browserTtsReference, referenceSourceLabel } from '../src/toneReferences.ts'
 import type { ToneAudioSource } from '../src/audioSources.ts'
 
 function voice(lang: string, name = lang): SpeechSynthesisVoice {
@@ -16,9 +16,23 @@ test('prototype audio accepts only explicit mainland Mandarin voices and reports
   assert.match(prototypeAudioStatus(false, []), /unavailable/)
 })
 
-test('reference sources use Browser TTS for schematic contours and local audio for recorded references', () => {
-  const schematic = audioSourceForReference(schematicToneReference(2))
+test('reference sources select browser TTS or measured local/corpus audio by source', () => {
+  const browserReference = browserTtsReference(2)
+  const schematic = audioSourceForReference(browserReference)
   assert.deepEqual(schematic, { kind: 'browser-speech', language: 'zh-CN', label: 'Prototype audio' })
+  assert.equal(browserReference.audioUrl, undefined)
+  assert.equal(browserReference.f0Trajectory, undefined)
+  assert.equal(referenceSourceLabel('local-tts'), 'Local TTS — synthetic reference')
+  assert.equal(referenceSourceLabel('browser-tts'), 'Browser TTS — prototype')
+  assert.deepEqual(audioSourceForReference({
+    id: 'local-tts-ma-tone-1',
+    syllable: 'ma',
+    tone: 1,
+    audioUrl: '/references/local-tts/ma1.wav',
+    source: 'local-tts',
+    voiceName: 'Example Mandarin Voice',
+    language: 'zh_CN',
+  }), { kind: 'local', url: '/references/local-tts/ma1.wav', label: 'local-tts reference' })
   assert.deepEqual(audioSourceForReference({
     id: 'mandi-ma-tone-2',
     syllable: 'ma',
@@ -26,10 +40,10 @@ test('reference sources use Browser TTS for schematic contours and local audio f
     speakerId: 'speaker-1',
     audioUrl: '/references/ma2.wav',
     f0Trajectory: [],
-    source: 'recorded',
-  }), { kind: 'local', url: '/references/ma2.wav', label: 'Recorded reference' })
+    source: 'corpus',
+  }), { kind: 'local', url: '/references/ma2.wav', label: 'corpus reference' })
   assert.throws(() => audioSourceForReference({
-    id: 'incomplete-recording', syllable: 'ma', tone: 2, source: 'recorded',
+    id: 'incomplete-recording', syllable: 'ma', tone: 2, source: 'corpus',
   }), /has no audio URL/)
 })
 

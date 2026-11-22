@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { analyzePitch, pitchFeedback, relativeSemitones } from '../src/pitchAnalysis.ts'
 import { semitoneTrajectory, splitPitchSegments } from '../src/pitchPlot.ts'
-import { schematicToneReference } from '../src/toneReferences.ts'
+import { browserTtsReference } from '../src/toneReferences.ts'
 
 function sine(frequency: number, seconds = 0.6, sampleRate = 16000, amplitude = 0.5) {
   return Float32Array.from({ length: Math.floor(seconds * sampleRate) }, (_, index) =>
@@ -74,9 +74,12 @@ test('trajectory segments preserve unvoiced gaps without interpolating across th
   assert.deepEqual(segments.map(segment => segment.map(frame => frame.f0Hz)), [[200, 210], [240, 250]])
 })
 
-test('schematic references contain no invented recorded trajectory', () => {
-  const reference = schematicToneReference(3)
-  assert.deepEqual(reference, { id: 'schematic-tone-3', syllable: 'ma', tone: 3, source: 'schematic' })
+test('browser TTS references contain no fabricated measured audio or F0 trajectory', () => {
+  const reference = browserTtsReference(3)
+  assert.deepEqual(reference, {
+    id: 'browser-tts-ma-tone-3', syllable: 'ma', tone: 3, source: 'browser-tts', language: 'zh-CN',
+  })
+  assert.equal(reference.audioUrl, undefined)
   assert.equal(reference.f0Trajectory, undefined)
 })
 

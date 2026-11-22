@@ -1,14 +1,18 @@
 import type { MandarinTone } from './tones.ts'
 import type { PitchFrame } from './pitchAnalysis.ts'
 
+export type ReferenceSource = 'local-tts' | 'corpus' | 'browser-tts'
+
 export interface ToneReference {
   id: string
   syllable: string
   tone: MandarinTone
-  speakerId?: string
+  source: ReferenceSource
   audioUrl?: string
+  speakerId?: string
+  voiceName?: string
+  language?: string
   f0Trajectory?: PitchFrame[]
-  source: 'schematic' | 'recorded'
 }
 
 export interface ToneReferenceAudioProvider {
@@ -20,6 +24,12 @@ export interface ToneReferenceAudioProvider {
   stop(): void
 }
 
-export function schematicToneReference(tone: MandarinTone): ToneReference {
-  return { id: `schematic-tone-${tone}`, syllable: 'ma', tone, source: 'schematic' }
+export function referenceSourceLabel(source: ReferenceSource): string {
+  if (source === 'local-tts') return 'Local TTS — synthetic reference'
+  if (source === 'corpus') return 'Corpus recording'
+  return 'Browser TTS — prototype'
+}
+
+export function browserTtsReference(tone: MandarinTone): ToneReference {
+  return { id: `browser-tts-ma-tone-${tone}`, syllable: 'ma', tone, source: 'browser-tts', language: 'zh-CN' }
 }

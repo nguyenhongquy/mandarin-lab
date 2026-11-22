@@ -58,3 +58,31 @@
   fill: #52635a;
   font-size: 4px;
 }
+
+.pitch-axis-label {
+  fill: #52635a;
+  font-size: 11px;
+}
+
+.legend-line,
+.legend-swatch {
+  display: inline-block;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+.legend-line {
+  width: 1.25rem;
+  border-top: 2px solid #24654e;
+}
+
+.legend-line.reference {
+  border-color: #c26b19;
+  border-style: dashed;
+}
+
+.legend-swatch {
+  width: 0.8rem;
+  height: 0.8rem;
+  background: #eef1ef;
+}

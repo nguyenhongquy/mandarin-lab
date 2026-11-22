@@ -1,8 +1,9 @@
 import { DEFAULT_PITCH_OPTIONS } from './pitchAnalysis'
 import type { PitchAnalysis } from './pitchAnalysis'
-import { normalizePitchAnalysis } from './pitchComparison'
+import { normalizePitchAnalysis, normalizePitchTime } from './pitchComparison'
 import type { ComparisonFrame } from './pitchComparison'
 import { splitPitchSegments } from './pitchPlot'
+import type { ToneAcousticFeatures } from './toneAcoustics'
 
 export type PitchDisplayMode = 'absolute' | 'relative'
 
@@ -50,13 +51,66 @@ function chartTicks(mode: PitchDisplayMode) {
     : [-12, -6, 0, 6, 12]
 }
 
-export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenceLabel, mode, showLearner, showReference }: {
+function featureMarkers(
+  analysis: PitchAnalysis,
+  features: ToneAcousticFeatures,
+  mode: PitchDisplayMode,
+  color: string,
+  label: string,
+) {
+  const interval = features.analysisInterval
+  const frames = normalizePitchAnalysis(analysis)
+  if (!interval || !frames) return null
+  const start = normalizePitchTime(analysis, interval.startTime)
+  const end = normalizePitchTime(analysis, interval.endTime)
+  const midpoint = features.earlyLateBoundaryTime === null
+    ? null : normalizePitchTime(analysis, features.earlyLateBoundaryTime)
+  const turningTime = features.turningPointTime
+  const turningFrame = turningTime === null ? null : frames
+    .filter(frame => valueFor(frame, mode) !== null)
+    .reduce<ComparisonFrame | null>((nearest, frame) =>
+      nearest === null || Math.abs(frame.time - turningTime) < Math.abs(nearest.time - turningTime) ? frame : nearest, null)
+  const turningValue = turningFrame ? valueFor(turningFrame, mode) : null
+  const turningPosition = turningTime === null ? null : normalizePitchTime(analysis, turningTime)
+
+  return <g aria-label={`${label} acoustic feature markers`}>
+    {start !== null && end !== null && <g>
+      {end > start && <rect x={xPosition(start)} y={chart.top} width={xPosition(end) - xPosition(start)}
+        height={plotHeight} fill={color} opacity="0.05">
+        <title>{`${label} selected analysis interval`}</title>
+      </rect>}
+      <line x1={xPosition(start)} y1={chart.top} x2={xPosition(start)} y2={chart.height - chart.bottom}
+        stroke={color} strokeDasharray="3 4" strokeWidth="1.5">
+        <title>{`${label} analysis interval start · ${interval.startTime.toFixed(3)} seconds`}</title>
+      </line>
+      <line x1={xPosition(end)} y1={chart.top} x2={xPosition(end)} y2={chart.height - chart.bottom}
+        stroke={color} strokeDasharray="3 4" strokeWidth="1.5">
+        <title>{`${label} analysis interval end · ${interval.endTime.toFixed(3)} seconds`}</title>
+      </line>
+    </g>}
+    {midpoint !== null && <line x1={xPosition(midpoint)} y1={chart.top} x2={xPosition(midpoint)}
+      y2={chart.height - chart.bottom} stroke="#65736a" strokeDasharray="2 5" strokeWidth="1">
+      <title>{`${label} early/late boundary · ${features.earlyLateBoundaryTime?.toFixed(3)} seconds`}</title>
+    </line>}
+    {turningPosition !== null && turningValue !== null && turningFrame && <circle
+      cx={xPosition(turningPosition)} cy={yPosition(turningValue, mode)} r="5"
+      fill="white" stroke={color} strokeWidth="2.5">
+      <title>{`${label} measured ${features.turningPointType ?? 'turning point'} · ${turningTime?.toFixed(3)} seconds · ${turningFrame.f0Hz?.toFixed(1)} Hz`}</title>
+    </circle>}
+  </g>
+}
+
+export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenceLabel, mode, showLearner, showReference,
+  learnerFeatures = null, referenceFeatures = null, showFeatureMarkers = false }: {
   learnerAnalysis: PitchAnalysis
   referenceAnalysis: PitchAnalysis | null
   referenceLabel: string
   mode: PitchDisplayMode
   showLearner: boolean
   showReference: boolean
+  learnerFeatures?: ToneAcousticFeatures | null
+  referenceFeatures?: ToneAcousticFeatures | null
+  showFeatureMarkers?: boolean
 }) {
   const learnerFrames = normalizePitchAnalysis(learnerAnalysis)
   const referenceFrames = referenceAnalysis ? normalizePitchAnalysis(referenceAnalysis) : null
@@ -89,12 +143,18 @@ export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenc
         <line x1={chart.left} y1={chart.top} x2={chart.left} y2={chart.height - chart.bottom} className="contour-axis" />
         <line x1={chart.left} y1={chart.height - chart.bottom} x2={chart.width - chart.right}
           y2={chart.height - chart.bottom} className="contour-axis" />
+        {showFeatureMarkers && showLearner && learnerFeatures
+          && featureMarkers(learnerAnalysis, learnerFeatures, mode, '#24654e', 'Learner')}
+        {showFeatureMarkers && showReference && referenceAnalysis && referenceFeatures
+          && featureMarkers(referenceAnalysis, referenceFeatures, mode, '#c26b19', referenceLabel)}
         {referencePaths.map((path, index) => <path key={`reference-${index}`} d={path} fill="none"
           stroke="#c26b19" strokeWidth="2.5" strokeDasharray="6 4" strokeLinecap="round" strokeLinejoin="round" />)}
         {learnerPaths.map((path, index) => <path key={`learner-${index}`} d={path} fill="none"
           stroke="#24654e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />)}
         {showReference && referenceFrames && pointsFor(referenceFrames, mode, '#c26b19')}
         {showLearner && learnerFrames && pointsFor(learnerFrames, mode, '#153c31')}
+        {showFeatureMarkers && <text x={chart.width - chart.right} y={chart.top + 10}
+          textAnchor="end" className="pitch-axis-label">Feature markers use measured timestamps</text>}
         <text x={(chart.left + chart.width - chart.right) / 2} y={chart.height - 8} textAnchor="middle" className="pitch-axis-label">
           Voiced interval time (normalized; hover points for original seconds)
         </text>
@@ -104,6 +164,7 @@ export function F0TrajectoryChart({ learnerAnalysis, referenceAnalysis, referenc
       <figcaption className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-600">
         {showReference && referenceFrames && <span><i className="legend-line reference" />Measured reference F0 · {referenceLabel}</span>}
         {showLearner && learnerFrames && <span><i className="legend-line measured" />Measured learner F0</span>}
+        {showFeatureMarkers && <span>Dashed lines · selected interval and midpoint; outlined point · detected turning point</span>}
         <span>Unvoiced or low-confidence intervals remain blank; lines do not bridge gaps.</span>
       </figcaption>
     </figure>

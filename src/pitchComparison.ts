@@ -29,6 +29,15 @@ export function normalizePitchAnalysis(analysis: PitchAnalysis): ComparisonFrame
   }))
 }
 
+export function normalizePitchTime(analysis: PitchAnalysis, time: number): number | null {
+  if (!Number.isFinite(time)) return null
+  const voiced = reliableFrames(analysis)
+  const first = voiced[0]
+  const last = voiced.at(-1)
+  if (!first || !last || last.time <= first.time) return null
+  return Math.max(0, Math.min(1, (time - first.time) / (last.time - first.time)))
+}
+
 function median(values: number[]): number | null {
   if (!values.length) return null
   const sorted = [...values].sort((a, b) => a - b)

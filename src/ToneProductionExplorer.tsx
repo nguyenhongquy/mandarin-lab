@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { decodeAndAnalyze } from './audioDecoder'
+import { AcousticInspector } from './AcousticInspector'
+import { compareToneFeatures } from './acousticComparison'
 import { F0TrajectoryChart } from './F0TrajectoryChart'
 import type { PitchDisplayMode } from './F0TrajectoryChart'
 import { comparePitchAnalyses, MIN_COMPARISON_VOICED_FRAMES, normalizePitchAnalysis } from './pitchComparison'
 import type { PitchAnalysis } from './pitchAnalysis'
+import { extractToneFeatures } from './toneAcoustics'
 import { browserTtsReference, referenceSourceLabel } from './toneReferences'
 import type { ToneReference } from './toneReferences'
 import type { ToneReferenceAudioProvider } from './toneReferences'
@@ -33,6 +36,7 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
   const [showReference, setShowReference] = useState(true)
   const [showLearner, setShowLearner] = useState(true)
   const [showSchematic, setShowSchematic] = useState(true)
+  const [showAcousticMarkers, setShowAcousticMarkers] = useState(false)
   const mountedRef = useRef(false)
   const recording = useToneRecording()
   const selectedTone = toneDefinition(tone)
@@ -40,6 +44,11 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
   const reference = useBrowserFallback || !localReference ? browserTtsReference(tone) : localReference
   const referenceLabel = referenceSourceLabel(reference.source)
   const referenceCanPlot = Boolean(referenceAnalysis && normalizePitchAnalysis(referenceAnalysis))
+  const learnerFeatures = useMemo(() => analysis ? extractToneFeatures(analysis) : null, [analysis])
+  const referenceFeatures = useMemo(() => referenceAnalysis ? extractToneFeatures(referenceAnalysis) : null, [referenceAnalysis])
+  const acousticComparison = learnerFeatures && referenceFeatures
+    ? compareToneFeatures(learnerFeatures, referenceFeatures)
+    : null
   const comparisonFeedback = analysis
     ? referenceAnalysis
       ? comparePitchAnalyses(referenceAnalysis, analysis)
@@ -382,7 +391,9 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
           F0 values are measurements from audio, not ground truth. The 0–100% time axis independently normalizes each recording's reliable voiced interval; this approximate alignment does not establish phonetic segment correspondence. Hover over points for original timestamps. Unvoiced gaps remain disconnected.
         </p>
         <F0TrajectoryChart learnerAnalysis={analysis} referenceAnalysis={referenceAnalysis}
-          referenceLabel={referenceLabel} mode={mode} showLearner={showLearner} showReference={showReference} />
+          referenceLabel={referenceLabel} mode={mode} showLearner={showLearner} showReference={showReference}
+          learnerFeatures={learnerFeatures} referenceFeatures={referenceFeatures}
+          showFeatureMarkers={showAcousticMarkers} />
         {showSchematic && <div className="grid items-center gap-3 rounded-xl bg-[#f7f9f5] p-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
           <p className="text-sm text-slate-600">
             Schematic teaching contour for Tone {tone}; illustrative only, not measured TTS or speaker data.
@@ -394,6 +405,9 @@ export function ToneProductionExplorer({ referenceAudio }: { referenceAudio: Ton
           {feedback.map(message => <p key={message} className="text-sm text-slate-700">{message}</p>)}
         </div>
       </>}
+      <AcousticInspector learnerFeatures={learnerFeatures} referenceFeatures={referenceFeatures}
+        referenceLabel={referenceLabel} comparison={acousticComparison}
+        showMarkers={showAcousticMarkers} onShowMarkersChange={setShowAcousticMarkers} />
     </section>
 
     <section className="panel space-y-3" aria-labelledby="step-6-heading">

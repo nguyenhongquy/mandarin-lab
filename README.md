@@ -34,8 +34,12 @@ Session summaries are saved in browser localStorage under `mandarin-speechlab.se
 
 ## Tone Production Explorer
 
-Select one of the four `ma` tones, record an isolated syllable for up to five seconds, replay it, then analyze it locally. Recording uses `getUserMedia` and `MediaRecorder`; decoding uses Web Audio. F0 is estimated with a lightweight YIN difference-function implementation using overlapping 35 ms frames and 10 ms hops, with a default 70–500 Hz acceptance range.
+The practice sequence is: choose one of the four `ma` tones, listen to the reference, record your pronunciation for up to five seconds, replay it, analyze it, and repeat. The reference is labeled **Browser TTS — prototype**. It reuses the Phase 1 browser speech provider, selects an available `zh-CN`/`zh-Hans-CN` voice, and reports when speech synthesis or a Mandarin voice is unavailable. Recording uses `getUserMedia` and `MediaRecorder`; decoding uses Web Audio.
+
+Browser TTS is not a validated native-speaker recording. Voice identity, accent, tone realization, and audio quality depend on the browser and installed system voices. `speechSynthesis.speak()` does not expose its rendered PCM through this interface, so the app does not estimate or fabricate a TTS F0 trajectory.
+
+F0 is estimated from the learner's recording with a lightweight YIN difference-function implementation using overlapping 35 ms frames and 10 ms hops, with a default 70–500 Hz acceptance range.
 
 Analysis displays absolute Hz or semitone movement relative to the recording's median F0. Unvoiced and low-confidence frames remain gaps. The relative view places the existing schematic tone contour beside the learner's measured trajectory; it is illustrative only and is never drawn as measured data on the absolute-Hz chart. Feedback describes detected movement and does not score or classify pronunciation.
 
-Raw recordings and analysis results stay in page memory, are not uploaded or saved automatically, and are released when the production module is left or the recording is discarded. Browser microphone and Web Audio support are required. The estimator is intended for practice and observation, not as ground-truth phonetic measurement; no ManDi corpus recordings are bundled.
+The recorded-reference interface can accept local or hosted audio URLs, speaker IDs, and measured F0 metadata in a future corpus phase; no ManDi recordings are downloaded or bundled now. Raw learner recordings and analysis results stay in page memory, are not uploaded or saved automatically, and are released when the production module is left or the recording is discarded. Browser microphone and Web Audio support are required. The estimator is intended for practice and observation, not as ground-truth phonetic measurement; no pronunciation scores are produced.

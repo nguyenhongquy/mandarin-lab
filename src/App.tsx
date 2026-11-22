@@ -9,6 +9,7 @@ import type { ExerciseMode } from './sessionTracking'
 import type { MandarinTone } from './tones'
 import { toneExample } from './tones'
 import { useToneAudio } from './useToneAudio'
+import type { ToneReferenceAudioProvider } from './toneReferences'
 
 type Mode = ExerciseMode
 type Workspace = 'listening' | 'production'
@@ -29,6 +30,14 @@ export function App() {
   const [storageNotice, setStorageNotice] = useState('')
   const audio = useToneAudio()
   const toneAudio = { ...audio, play: (tone: MandarinTone) => audio.play(toneExample(tone)) }
+  const referenceAudio: ToneReferenceAudioProvider = {
+    status: audio.status,
+    playing: audio.playing,
+    error: audio.error,
+    available: audio.availableReference,
+    play: audio.playReference,
+    stop: audio.stop,
+  }
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
 
   function record(modeForResult: Mode, selection: string, attempts: number, correct: number | null) {
@@ -114,7 +123,7 @@ export function App() {
           <ToneContrast audio={toneAudio} onResult={(pairId, attempts, correct) => record('contrast', pairId, attempts, correct)} />
         </section>
       </section>
-      {workspace === 'production' && <ToneProductionExplorer />}
+      {workspace === 'production' && <ToneProductionExplorer referenceAudio={referenceAudio} />}
     </main>
     <footer className="py-8 text-center text-xs text-slate-500">
       Tone contours are illustrative teaching diagrams, not measured pitch tracks.

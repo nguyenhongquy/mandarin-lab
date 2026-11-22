@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createToneAudioPlayer, mandarinVoices, prototypeAudioStatus } from '../src/toneAudio.ts'
+import { audioSourceForReference } from '../src/audioSources.ts'
+import { schematicToneReference } from '../src/toneReferences.ts'
 import type { ToneAudioSource } from '../src/audioSources.ts'
 
 function voice(lang: string, name = lang): SpeechSynthesisVoice {
@@ -12,6 +14,23 @@ test('prototype audio accepts only explicit mainland Mandarin voices and reports
   assert.deepEqual(available.map(item => item.lang), ['zh-CN', 'zh-Hans-CN'])
   assert.match(prototypeAudioStatus(true, []), /Waiting for a zh-CN Mandarin voice/)
   assert.match(prototypeAudioStatus(false, []), /unavailable/)
+})
+
+test('reference sources use Browser TTS for schematic contours and local audio for recorded references', () => {
+  const schematic = audioSourceForReference(schematicToneReference(2))
+  assert.deepEqual(schematic, { kind: 'browser-speech', language: 'zh-CN', label: 'Prototype audio' })
+  assert.deepEqual(audioSourceForReference({
+    id: 'mandi-ma-tone-2',
+    syllable: 'ma',
+    tone: 2,
+    speakerId: 'speaker-1',
+    audioUrl: '/references/ma2.wav',
+    f0Trajectory: [],
+    source: 'recorded',
+  }), { kind: 'local', url: '/references/ma2.wav', label: 'Recorded reference' })
+  assert.throws(() => audioSourceForReference({
+    id: 'incomplete-recording', syllable: 'ma', tone: 2, source: 'recorded',
+  }), /has no audio URL/)
 })
 
 test('speech playback uses zh-CN and replay cancels the previous utterance', async () => {
@@ -42,6 +61,23 @@ test('speech playback uses zh-CN and replay cancels the previous utterance', asy
   const completed = player.play(source, '马', selected)
   spoken[2]!.onend?.(new Event('end') as SpeechSynthesisEvent)
   assert.equal(await completed, true)
+})
+
+test('missing voices and synthesis exceptions surface playback errors', async () => {
+  const updates: [boolean, string?][] = []
+  const source: ToneAudioSource = { kind: 'browser-speech', language: 'zh-CN', label: 'Prototype audio' }
+  const unavailable = createToneAudioPlayer(undefined, text => ({ text } as SpeechSynthesisUtterance),
+    (playing, error) => updates.push([playing, error]), () => { throw new Error('No local audio expected.') })
+  assert.equal(await unavailable.play(source, '妈'), false)
+  assert.match(updates.at(-1)?.[1] ?? '', /No zh-CN Mandarin voice is available/)
+
+  const failing = createToneAudioPlayer({
+    speak() { throw new Error('speech service failed') },
+    cancel() {},
+  }, text => ({ text } as SpeechSynthesisUtterance), (playing, error) => updates.push([playing, error]),
+  () => { throw new Error('No local audio expected.') })
+  assert.equal(await failing.play(source, '妈', voice('zh-CN')), false)
+  assert.match(updates.at(-1)?.[1] ?? '', /speech service failed/)
 })
 
 test('local playback reports errors and is stopped before another source starts', async () => {

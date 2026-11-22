@@ -1,6 +1,7 @@
 import { languageConfig } from './config.ts'
-import { toneExamples } from './tones.ts'
+import { toneExample, toneExamples } from './tones.ts'
 import type { ToneExample } from './tones.ts'
+import type { ToneReference } from './toneReferences.ts'
 
 export type ToneAudioSource =
   | { kind: 'local'; url: string; label: string }
@@ -17,4 +18,12 @@ export function audioSourceFor(example: ToneExample): ToneAudioSource {
   const source = toneAudioSources[example.id]
   if (!source) throw new Error(`No audio source is configured for ${example.id}.`)
   return source
+}
+
+export function audioSourceForReference(reference: ToneReference): ToneAudioSource {
+  if (reference.source === 'recorded') {
+    if (!reference.audioUrl) throw new Error(`Recorded reference ${reference.id} has no audio URL.`)
+    return { kind: 'local', url: reference.audioUrl, label: 'Recorded reference' }
+  }
+  return audioSourceFor(toneExample(reference.tone))
 }
